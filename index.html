@@ -33,6 +33,13 @@
             opacity: 0;
             transition: opacity 0.2s;
         }
+        .message-content:hover .copy-btn {
+            opacity: 1;
+        }
+        .copy-btn {
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
     </style>
 </head>
 <body>
@@ -121,7 +128,7 @@
                 this.maxTokens = 4096;
                 this.loading = false;
                 this.isAuthenticated = false;
-                this.sidebarOpen = window.innerWidth >= 768;
+                this.sidebarOpen = true; // Deschis by default
                 this.showSettings = false;
                 this.client = null;
                 this.copiedMessageId = null;
@@ -180,6 +187,7 @@
 
             switchChat(chatId) {
                 this.currentChatId = chatId;
+                // Pe mobile, închide sidebar-ul după selectarea chat-ului
                 if (window.innerWidth < 768) {
                     this.sidebarOpen = false;
                 }
@@ -240,7 +248,7 @@
                     const chatCompletion = await this.client.chatCompletion({
                         provider: "auto",
                         model: this.modelName,
-                        messages: [{ role: 'user', content: 'Hello GPT' }],
+                        messages: [{ role: 'user', content: 'Salut! Vreau să vorbim în limba română.' }],
                         max_tokens: this.maxTokens,
                     });
 
@@ -374,6 +382,12 @@
             // ============================================
             attachEventListeners() {
                 document.addEventListener('click', (e) => {
+                    // Close sidebar on overlay click (mobile)
+                    if (e.target.id === 'sidebar-overlay') {
+                        this.sidebarOpen = false;
+                        this.render();
+                    }
+                    
                     // Auth
                     if (e.target.closest('#auth-btn')) {
                         e.preventDefault();
@@ -500,8 +514,10 @@
             }
 
             renderSidebar() {
+                if (!this.sidebarOpen) return '';
+                
                 return `
-                    <div class="${this.sidebarOpen ? 'translate-x-0' : '-translate-x-full'} md:translate-x-0 fixed md:relative z-30 w-64 h-full bg-slate-900 border-r border-slate-700 flex flex-col transition-transform duration-300">
+                    <div class="fixed left-0 top-0 md:relative z-30 w-64 h-full bg-slate-900 border-r border-slate-700 flex flex-col transition-all duration-300">
                         <!-- Sidebar Header -->
                         <div class="p-4 border-b border-slate-700">
                             <button id="new-chat-btn" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all font-medium">
@@ -526,7 +542,11 @@
                         </div>
                         
                         <!-- Sidebar Footer -->
-                        <div class="p-4 border-t border-slate-700">
+                        <div class="p-4 border-t border-slate-700 space-y-2">
+                            <button id="toggle-sidebar" class="w-full flex items-center gap-2 px-4 py-2.5 text-gray-300 hover:bg-slate-800 rounded-lg transition-colors">
+                                ${icons.close}
+                                <span>Ascunde Sidebar</span>
+                            </button>
                             <button id="settings-btn" class="w-full flex items-center gap-2 px-4 py-2.5 text-gray-300 hover:bg-slate-800 rounded-lg transition-colors">
                                 ${icons.settings}
                                 <span>Setări</span>
@@ -579,6 +599,9 @@
                 
                 return `
                     <div class="fixed inset-0 flex bg-slate-900">
+                        <!-- Mobile Overlay -->
+                        ${this.sidebarOpen ? `<div class="md:hidden fixed inset-0 bg-black/50 z-20" id="sidebar-overlay"></div>` : ''}
+                        
                         ${this.renderSidebar()}
                         
                         <!-- Main Chat Area -->
@@ -586,9 +609,11 @@
                             <!-- Header -->
                             <div class="bg-slate-800 border-b border-slate-700 px-4 py-3 flex items-center justify-between">
                                 <div class="flex items-center gap-3">
-                                    <button id="toggle-sidebar" class="md:hidden text-gray-400 hover:text-white">
-                                        ${icons.menu}
-                                    </button>
+                                    ${!this.sidebarOpen ? `
+                                        <button id="toggle-sidebar" class="text-gray-400 hover:text-white p-1 hover:bg-slate-700 rounded transition-colors">
+                                            ${icons.menu}
+                                        </button>
+                                    ` : ''}
                                     <h1 class="text-lg font-bold text-white">DarkGPT</h1>
                                     <span class="text-sm text-gray-400">${this.escapeHtml(this.modelName)}</span>
                                 </div>
@@ -611,7 +636,7 @@
                                     </div>
                                 ` : messages.map(msg => `
                                     <div class="flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}">
-                                        <div class="max-w-3xl ${msg.role === 'user' ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' : 'bg-slate-800 text-gray-100'} rounded-2xl px-4 py-3 relative group">
+                                        <div class="message-content max-w-3xl ${msg.role === 'user' ? 'bg-gradient-to-r from-purple-600 to-blue-600 text-white' : 'bg-slate-800 text-gray-100'} rounded-2xl px-4 py-3 relative">
                                             <p class="whitespace-pre-wrap">${this.escapeHtml(msg.content)}</p>
                                             ${msg.role === 'assistant' ? `
                                                 <button class="copy-btn absolute -bottom-8 right-0 flex items-center gap-1 px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded text-xs text-gray-300 transition-colors" data-message-id="${msg.id}" data-content="${this.escapeHtml(msg.content)}">
