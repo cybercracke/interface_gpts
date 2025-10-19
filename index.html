@@ -33,33 +33,159 @@
         // Import Hugging Face Inference Client from CDN
         import { InferenceClient } from 'https://cdn.jsdelivr.net/npm/@huggingface/inference@4.11.3/+esm';
 
+        // ============================================
+        // CREDENȚIALE CRIPTATE - COMPLETEAZĂ CU STRINGUL TĂU
+        // ============================================
+        const ENCRYPTED_CREDENTIALS = "ENCRYPTED_DATA_HERE";
+
+        // ============================================
+        // FUNCȚII DE DECRIPTARE
+        // ============================================
+        async function deriveKey(password, salt) {
+            const encoder = new TextEncoder();
+            const keyMaterial = await crypto.subtle.importKey(
+                'raw',
+                encoder.encode(password),
+                'PBKDF2',
+                false,
+                ['deriveBits', 'deriveKey']
+            );
+            
+            return crypto.subtle.deriveKey(
+                {
+                    name: 'PBKDF2',
+                    salt: salt,
+                    iterations: 100000,
+                    hash: 'SHA-256'
+                },
+                keyMaterial,
+                { name: 'AES-GCM', length: 256 },
+                false,
+                ['encrypt', 'decrypt']
+            );
+        }
+
+        async function decryptCredentials(encryptedBase64, password) {
+            try {
+                const combined = new Uint8Array(
+                    atob(encryptedBase64).split('').map(c => c.charCodeAt(0))
+                );
+                
+                const salt = combined.slice(0, 16);
+                const iv = combined.slice(16, 28);
+                const encryptedData = combined.slice(28);
+                
+                const key = await deriveKey(password, salt);
+                
+                const decryptedBuffer = await crypto.subtle.decrypt(
+                    { name: 'AES-GCM', iv: iv },
+                    key,
+                    encryptedData
+                );
+                
+                const decoder = new TextDecoder();
+                const decryptedString = decoder.decode(decryptedBuffer);
+                const credentials = JSON.parse(decryptedString);
+                
+                return credentials;
+                
+            } catch (error) {
+                throw new Error('Decriptare eșuată: Parolă incorectă sau date corupte');
+            }
+        }
+
         // SVG Icons
         const icons = {
             messageSquare: `<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>`,
             settings: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M12 1v6m0 6v6m9-9h-6m-6 0H3m15.364 6.364l-4.243-4.243m-6.364 0L3.636 9.636m12.728 12.728l-4.243-4.243m-6.364 0L3.636 14.364"></path></svg>`,
             send: `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>`,
-            trash: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`
+            trash: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>`,
+            lock: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`
         };
 
         class ChatApp {
             constructor() {
                 this.messages = [];
                 this.apiKey = '';
-                this.modelName = 'darkc0de/Xortron';
+                this.modelName = '';
                 this.maxTokens = 4096;
                 this.loading = false;
-                this.showSettings = true;
+                this.showSettings = false; // Collapsed by default după autentificare
+                this.isAuthenticated = false;
                 this.client = null;
                 
                 this.render();
                 this.attachEventListeners();
             }
 
+            async authenticate(password) {
+                try {
+                    // Încearcă să decriptezi credențialele
+                    const credentials = await decryptCredentials(ENCRYPTED_CREDENTIALS, password);
+                    
+                    // Setează credențialele decriptate
+                    this.apiKey = credentials.key;
+                    this.modelName = credentials.model;
+                    this.isAuthenticated = true;
+                    
+                    // Adaugă mesaj de succes în chat
+                    this.messages.push({
+                        role: 'assistant',
+                        content: '✅ Decriptare reușită! Conexiune stabilită cu succes.\n\nTestez conexiunea...'
+                    });
+                    
+                    this.render();
+                    this.scrollToBottom();
+                    
+                    // Trimite mesaj de test automat
+                    await this.sendTestMessage();
+                    
+                } catch (error) {
+                    // Adaugă mesaj de eroare în chat
+                    this.messages.push({
+                        role: 'assistant',
+                        content: '❌ Eroare de autentificare: Parolă incorectă!\n\nTe rog încearcă din nou.'
+                    });
+                    this.render();
+                    this.scrollToBottom();
+                }
+            }
+
+            async sendTestMessage() {
+                this.loading = true;
+                this.render();
+
+                try {
+                    this.client = new InferenceClient(this.apiKey);
+                    
+                    const chatCompletion = await this.client.chatCompletion({
+                        provider: "auto",
+                        model: this.modelName,
+                        messages: [{ role: 'user', content: 'Hello GPT' }],
+                        max_tokens: this.maxTokens,
+                    });
+
+                    this.messages.push({
+                        role: 'assistant',
+                        content: chatCompletion.choices[0].message.content
+                    });
+                } catch (error) {
+                    this.messages.push({
+                        role: 'assistant',
+                        content: `❌ Eroare la testarea conexiunii: ${error.message}`
+                    });
+                } finally {
+                    this.loading = false;
+                    this.render();
+                    this.scrollToBottom();
+                }
+            }
+
             async sendMessage() {
                 const input = document.getElementById('message-input');
                 const messageText = input.value.trim();
                 
-                if (!messageText || !this.apiKey) return;
+                if (!messageText || !this.isAuthenticated) return;
 
                 const userMessage = { role: 'user', content: messageText };
                 this.messages.push(userMessage);
@@ -68,14 +194,12 @@
                 this.render();
 
                 try {
-                    // Create Inference Client with API key
                     this.client = new InferenceClient(this.apiKey);
                     
-                    // Call chatCompletion exactly as in the documentation
                     const chatCompletion = await this.client.chatCompletion({
                         provider: "auto",
                         model: this.modelName,
-                        messages: this.messages,
+                        messages: this.messages.filter(m => m.role === 'user' || m.role === 'assistant'),
                         max_tokens: this.maxTokens,
                     });
 
@@ -86,10 +210,9 @@
 
                     this.messages.push(assistantMessage);
                 } catch (error) {
-                    console.error('Error:', error);
                     this.messages.push({
                         role: 'assistant',
-                        content: `❌ Eroare: ${error.message}\n\nVerifică:\n- Token-ul HF este valid\n- Numele modelului este corect (${this.modelName})\n- Modelul suportă chat completions\n- Provider-ul "auto" găsește un provider disponibil pentru acest model`,
+                        content: `❌ Eroare: ${error.message}`,
                     });
                 } finally {
                     this.loading = false;
@@ -125,6 +248,13 @@
 
             attachEventListeners() {
                 document.addEventListener('click', (e) => {
+                    if (e.target.closest('#auth-btn')) {
+                        e.preventDefault();
+                        const passwordInput = document.getElementById('auth-password');
+                        if (passwordInput && passwordInput.value) {
+                            this.authenticate(passwordInput.value);
+                        }
+                    }
                     if (e.target.closest('#send-btn')) {
                         e.preventDefault();
                         this.sendMessage();
@@ -140,6 +270,13 @@
                 });
 
                 document.addEventListener('keypress', (e) => {
+                    if (e.target.id === 'auth-password' && e.key === 'Enter') {
+                        e.preventDefault();
+                        const passwordInput = document.getElementById('auth-password');
+                        if (passwordInput && passwordInput.value) {
+                            this.authenticate(passwordInput.value);
+                        }
+                    }
                     if (e.target.id === 'message-input' && e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault();
                         this.sendMessage();
@@ -147,15 +284,58 @@
                 });
 
                 document.addEventListener('input', (e) => {
-                    if (e.target.id === 'api-key') this.apiKey = e.target.value;
-                    if (e.target.id === 'model-name') this.modelName = e.target.value;
                     if (e.target.id === 'max-tokens') this.maxTokens = parseInt(e.target.value) || 4096;
                 });
             }
 
-            render() {
-                const root = document.getElementById('root');
-                root.innerHTML = `
+            renderAuthScreen() {
+                return `
+                    <div class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
+                        <div class="w-full max-w-md bg-slate-800 rounded-2xl shadow-2xl overflow-hidden">
+                            
+                            <!-- Auth Header -->
+                            <div class="bg-gradient-to-r from-purple-600 to-blue-600 p-6 text-center">
+                                <div class="flex justify-center mb-4">
+                                    <div class="text-white">${icons.lock}</div>
+                                </div>
+                                <h1 class="text-2xl font-bold text-white mb-2">Autentificare Securizată</h1>
+                                <p class="text-purple-100 text-sm">Introdu parola pentru a accesa chat-ul</p>
+                            </div>
+
+                            <!-- Auth Form -->
+                            <div class="p-6 space-y-4">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-200 mb-2">
+                                        Parolă de Decriptare
+                                    </label>
+                                    <input
+                                        id="auth-password"
+                                        type="password"
+                                        placeholder="Introdu parola..."
+                                        class="w-full px-4 py-3 bg-slate-600 border border-slate-500 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                    />
+                                </div>
+
+                                <button
+                                    id="auth-btn"
+                                    class="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-blue-700 transition-all"
+                                >
+                                    🔓 Conectează
+                                </button>
+
+                                <div class="bg-amber-900/30 border border-amber-600/50 rounded-lg p-3">
+                                    <p class="text-xs text-amber-200">
+                                        🔒 Credențialele sunt criptate cu AES-256-GCM pentru securitate maximă.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderChatScreen() {
+                return `
                     <div class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center p-4">
                         <div class="w-full max-w-4xl bg-slate-800 rounded-2xl shadow-2xl overflow-hidden">
                             
@@ -189,17 +369,13 @@
                                                 Hugging Face API Token
                                             </label>
                                             <input
-                                                id="api-key"
                                                 type="password"
                                                 value="${this.escapeHtml(this.apiKey)}"
-                                                placeholder="hf_..."
-                                                class="w-full px-4 py-2 bg-slate-600 border border-slate-500 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                disabled
+                                                class="w-full px-4 py-2 bg-slate-600 border border-slate-500 rounded-lg text-white placeholder-gray-400 opacity-75 cursor-not-allowed"
                                             />
                                             <p class="text-xs text-gray-400 mt-2">
-                                                Obține un token gratuit de la
-                                                <a href="https://huggingface.co/settings/tokens" target="_blank" rel="noopener noreferrer" class="text-purple-400 hover:underline">
-                                                    huggingface.co/settings/tokens
-                                                </a>
+                                                ✅ Token decriptat și configurat
                                             </p>
                                         </div>
                                         
@@ -208,14 +384,13 @@
                                                 Numele Complet al Modelului
                                             </label>
                                             <input
-                                                id="model-name"
                                                 type="text"
                                                 value="${this.escapeHtml(this.modelName)}"
-                                                placeholder="username/model-name"
-                                                class="w-full px-4 py-2 bg-slate-600 border border-slate-500 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                disabled
+                                                class="w-full px-4 py-2 bg-slate-600 border border-slate-500 rounded-lg text-white placeholder-gray-400 opacity-75 cursor-not-allowed"
                                             />
                                             <p class="text-xs text-gray-400 mt-2">
-                                                Format: username/model-name
+                                                ✅ Model decriptat și configurat
                                             </p>
                                         </div>
 
@@ -236,9 +411,9 @@
                                             </p>
                                         </div>
 
-                                        <div class="bg-blue-900/30 border border-blue-600/50 rounded-lg p-3">
-                                            <p class="text-sm text-blue-200">
-                                                ✅ Folosește <strong>provider: "auto"</strong> pentru auto-detectare
+                                        <div class="bg-green-900/30 border border-green-600/50 rounded-lg p-3">
+                                            <p class="text-sm text-green-200">
+                                                🔒 Autentificat cu succes • Provider: auto
                                             </p>
                                         </div>
                                     </div>
@@ -250,10 +425,8 @@
                                 ${this.messages.length === 0 ? `
                                     <div class="text-center text-gray-400 mt-20">
                                         <div class="mx-auto mb-4 opacity-50 flex justify-center">${icons.messageSquare}</div>
-                                        <p class="text-lg mb-2">Începe o conversație cu ${this.escapeHtml(this.modelName)}</p>
-                                        <p class="text-sm">
-                                            ${this.apiKey ? 'Scrie un mesaj mai jos pentru a începe...' : 'Introdu token-ul HF în setări pentru a începe'}
-                                        </p>
+                                        <p class="text-lg mb-2">Chat activ cu ${this.escapeHtml(this.modelName)}</p>
+                                        <p class="text-sm">Scrie un mesaj pentru a începe conversația...</p>
                                     </div>
                                 ` : this.messages.map((msg, idx) => `
                                     <div class="flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}">
@@ -284,14 +457,14 @@
                                 <div class="flex gap-2">
                                     <textarea
                                         id="message-input"
-                                        placeholder="${this.apiKey ? 'Scrie un mesaj...' : 'Setează API token-ul mai întâi...'}"
-                                        ${!this.apiKey || this.loading ? 'disabled' : ''}
+                                        placeholder="Scrie un mesaj..."
+                                        ${this.loading ? 'disabled' : ''}
                                         class="flex-1 px-4 py-3 bg-slate-600 border border-slate-500 rounded-lg text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none disabled:opacity-50 disabled:cursor-not-allowed"
                                         rows="2"
                                     ></textarea>
                                     <button
                                         id="send-btn"
-                                        ${!this.apiKey || this.loading ? 'disabled' : ''}
+                                        ${this.loading ? 'disabled' : ''}
                                         class="px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white rounded-lg hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center"
                                     >
                                         ${icons.send}
@@ -304,6 +477,15 @@
                         </div>
                     </div>
                 `;
+            }
+
+            render() {
+                const root = document.getElementById('root');
+                if (!this.isAuthenticated) {
+                    root.innerHTML = this.renderAuthScreen();
+                } else {
+                    root.innerHTML = this.renderChatScreen();
+                }
             }
         }
 
